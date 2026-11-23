@@ -1,53 +1,93 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard and mouse input state manager with edge-triggered action helpers.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export class InputManager {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.keys = new Set();
+    this.pressed = new Set();
+    this.mouseX = window.innerWidth * 0.5;
+    this.mouseY = window.innerHeight * 0.5;
+    this.mouseDown = false;
+    this.mouseClicked = false;
+    this.wheelDelta = 0;
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+    this._onKeyDown = (e) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+        e.preventDefault();
+      }
+      if (!this.keys.has(e.code)) {
+        this.pressed.add(e.code);
+      }
+      this.keys.add(e.code);
+    };
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+    this._onKeyUp = (e) => {
+      this.keys.delete(e.code);
+    };
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+    this._onBlur = () => {
+      this.keys.clear();
+      this.pressed.clear();
+      this.mouseDown = false;
+    };
 
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+    this._onMouseMove = (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouseX = e.clientX - rect.left;
+      this.mouseY = e.clientY - rect.top;
+    };
+
+    this._onMouseDown = (e) => {
+      if (e.button !== 0) return;
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouseX = e.clientX - rect.left;
+      this.mouseY = e.clientY - rect.top;
+      this.mouseDown = true;
+      this.mouseClicked = true;
+    };
+
+    this._onMouseUp = (e) => {
+      if (e.button === 0) this.mouseDown = false;
+    };
+
+    this._onWheel = (e) => {
+      this.wheelDelta += Math.sign(e.deltaY);
+    };
+
+    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keyup', this._onKeyUp);
+    window.addEventListener('blur', this._onBlur);
+    canvas.addEventListener('mousemove', this._onMouseMove);
+    canvas.addEventListener('mousedown', this._onMouseDown);
+    window.addEventListener('mouseup', this._onMouseUp);
+    canvas.addEventListener('wheel', this._onWheel, { passive: true });
+  }
+
+  down(code) {
+    return this.keys.has(code);
+  }
+
+  wasPressed(code) {
+    return this.pressed.has(code);
+  }
+
+  anyDown(codes) {
+    for (const c of codes) {
+      if (this.keys.has(c)) return true;
+    }
+    return false;
+  }
+
+  anyPressed(codes) {
+    for (const c of codes) {
+      if (this.pressed.has(c)) return true;
+    }
+    return false;
+  }
+
+  endFrame() {
+    this.pressed.clear();
+    this.mouseClicked = false;
+    this.wheelDelta = 0;
+  }
 }
